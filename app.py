@@ -1,12 +1,37 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Security, status
+from fastapi.security.api_key import APIKeyHeader
+import os
 from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
 from recipe_scrapers import scrape_me
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
+
+AUTH_KEY = os.getenv("AUTH_KEY")
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    if not AUTH_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server authentication key not configured",
+        )
+
+    if api_key_header == AUTH_KEY:
+        return api_key_header
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Could not validate credentials",
+    )
+
 
 app = FastAPI(
-    title="Recipe Scraper API",
+    title="Web Scraper API",
     version="1.0.0",
     description="A simple recipe scraper that returns raw data",
 )
@@ -97,7 +122,9 @@ def enhance_recipe_data(soup, data: dict) -> dict:
         return data
 
     # Enrich Ingredients if missing or simple string
-    if not data.get("recipeIngredient") or isinstance(data.get("recipeIngredient"), str):
+    if not data.get("recipeIngredient") or isinstance(
+        data.get("recipeIngredient"), str
+    ):
         ingredients_div = soup.find(id="ingredients")
         if ingredients_div:
             items = [li.get_text(strip=True) for li in ingredients_div.find_all("li")]
@@ -114,12 +141,12 @@ def enhance_recipe_data(soup, data: dict) -> dict:
             ]
             if steps:
                 data["recipeInstructions"] = steps
-    
+
     return data
 
 
 @app.post("/scrape")
-async def scrape_recipe(request: ScrapeRequest):
+async def scrape_recipe(request: ScrapeRequest, api_key: str = Security(get_api_key)):
     """
     Scrape recipe data from a URL.
 
